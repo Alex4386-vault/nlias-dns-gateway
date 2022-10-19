@@ -30,12 +30,17 @@ async function handleNetpia(query: string) {
     },
   });
 
+  console.log(chalk.magentaBright('!'), 'Handling NLIAS domain:', query);
+
   const coolupMatchFoundRegex = /<meta http-equiv=(?:"|')refresh(?:"|') content=(?:"|')0;(?:| )url=(.+)(?:"|')>/g;
   const result = coolupMatchFoundRegex.exec(data.data);
 
   if (result) {
+    console.log(chalk.magentaBright('!'), 'Handled NLIAS domain:', query, '->', new URL(result[1]).hostname);
     return result[1];
   }
+
+  console.log(chalk.redBright('X'), 'NLIAS domain:', query, 'not found');
 }
 
 const dnsClient = new DNS2();
@@ -46,18 +51,24 @@ const dnsServer = DNS2.createServer({
   handle: async (req, send, rinfo) => {
     const resp = DNS2.Packet.createResponseFromRequest(req);
     const name = req.questions[0].name;
-    let queryName = name;
 
     if (name.indexOf('.') < 0) {
       if (name.indexOf('xn--') === 0) {
         const netpiaResult = await handleNetpia(punycode.toUnicode(name));
         if (netpiaResult) {
-          queryName = new URL(netpiaResult).hostname;
+          resp.answers.push({
+            type: DNS2.Packet.TYPE.CNAME,
+            ttl: 60,
+            domain: new URL(netpiaResult).hostname,
+            name,
+            class: DNS2.Packet.CLASS.IN,
+          });
+          return send(resp);
         }
       }
     }
 
-    const queryV4 = await dnsClient.resolveA(queryName);
+    const queryV4 = await dnsClient.resolveA(name);
     for (const answer of queryV4.answers) {
       resp.answers.push({
         name: name,
@@ -68,7 +79,7 @@ const dnsServer = DNS2.createServer({
       });
     }
 
-    const queryV6 = await dnsClient.resolveA(queryName);
+    const queryV6 = await dnsClient.resolveA(name);
     for (const answer of queryV6.answers) {
       resp.answers.push({
         name: name,
